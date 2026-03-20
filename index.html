@@ -86,16 +86,10 @@ let markers = [];
 // ------------------------------
 async function fetchData() {
     try {
-       const res = await fetch("http://127.0.0.1:5000/data", { method: 'GET', mode: 'cors' });
-        console.log('FETCH STATUS', res.status, res.statusText, res.headers.get('Access-Control-Allow-Origin'));
-
-        if (!res.ok) {
-            throw new Error(`Fetch error: ${res.status} ${res.statusText}`);
-        }
-
+        const res = await fetch("http://127.0.0.1:5000/data");
         const data = await res.json();
 
-        console.log("DATA RECEIVED:", data);  // 👈 DEBUG
+        console.log("DATA RECEIVED:", data); // DEBUG
 
         const table = document.getElementById("dataTable");
 
@@ -108,50 +102,27 @@ async function fetchData() {
             </tr>
         `;
 
-        // Remove old markers
-        markers.forEach(m => map.removeLayer(m));
-        markers = [];
-
         data.forEach(item => {
-            const coordsText = Array.isArray(item.coordinates) ? item.coordinates.join(', ') : item.coordinates;
-
             table.innerHTML += `
                 <tr>
-                    <td>${item.object || 'unknown'}</td>
-                    <td>${item.status || 'unknown'}</td>
-                    <td>${item.priority || 'LOW'}</td>
-                    <td>${coordsText}</td>
+                    <td>${item.object}</td>
+                    <td>${item.status}</td>
+                    <td>${item.priority}</td>
+                    <td>${item.coordinates}</td>
                 </tr>
             `;
-
-            const latitude = Number(item.latitude) || 20.2961;
-            const longitude = Number(item.longitude) || 85.8245;
-
-            let marker = L.marker([latitude, longitude])
-                .addTo(map)
-                .bindPopup(`${item.object || 'object'} - ${item.status || 'status'}`);
-
-            markers.push(marker);
         });
-
-        latestData = data;
-
-        // recommendation logic
-        const highPriority = data.filter(d => (d.priority || '').toUpperCase().includes('HIGH')).length;
-        const medPriority = data.filter(d => (d.priority || '').toUpperCase().includes('MEDIUM')).length;
-
-        let recommendation = 'No critical supply actions currently.';
-        if (highPriority > 0) {
-            recommendation = `🚨 High alert detected: ${highPriority} item(s). Recommend: medical kits, evacuation teams, emergency response.`;
-        } else if (medPriority > 0) {
-            recommendation = `⚠️ Medium alert detected: ${medPriority} item(s). Recommend: first aid kits, food/water packages, monitoring.`;
-        }
-        document.getElementById('recommendations').innerText = recommendation;
 
     } catch (err) {
         console.log("❌ Error:", err);
     }
 }
+
+// AUTO REFRESH
+setInterval(fetchData, 2000);
+
+// RUN ON LOAD
+fetchData();
 
 // ------------------------------
 // AUTO REFRESH (IMPORTANT)
@@ -165,32 +136,37 @@ fetchData();
 // ------------------------------
 // CSV DOWNLOAD
 // ------------------------------
-function downloadCSV() {
-    if (!latestData || latestData.length === 0) {
-        alert('No data to download yet');
-        return;
+
+async function downloadCSV() {
+    try {
+        const res = await fetch("http://127.0.0.1:5000/data");
+        const data = await res.json();
+
+        if (!data || data.length === 0) {
+            alert("No data to download yet");
+            return;
+        }
+
+        let csv = "Object,Status,Priority,Coordinates\n";
+
+        data.forEach(item => {
+            csv += `${item.object},${item.status},${item.priority},"${item.coordinates}"\n`;
+        });
+
+        // Create file
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sky_guardian_data.csv";
+        a.click();
+
+        window.URL.revokeObjectURL(url);
+
+    } catch (err) {
+        console.log("❌ CSV Error:", err);
     }
-
-    const header = ['Object', 'Status', 'Priority', 'Latitude', 'Longitude', 'Coordinates'];
-    const rows = latestData.map(item => [
-        item.object || '',
-        item.status || '',
-        item.priority || '',
-        item.latitude || '',
-        item.longitude || '',
-        Array.isArray(item.coordinates) ? item.coordinates.join(' ') : (item.coordinates || '')
-    ]);
-
-    const csvContent = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'sky_guardian_data.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
 }
 
 
@@ -209,6 +185,7 @@ async function sendSupply() {
     alert("✅ Request Sent");
 }
 </script>
+fetchData();
 
 </body>
 </html>
