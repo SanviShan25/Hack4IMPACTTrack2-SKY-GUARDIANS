@@ -1,5 +1,5 @@
 # ==========================================
-# SKY GUARDIAN - FINAL ML SYSTEM (FIXED)
+# SKY GUARDIAN - FINAL STABLE ML SYSTEM
 # ==========================================
 
 import cv2
@@ -14,42 +14,24 @@ import requests
 def send_data(data):
     try:
         requests.post("http://127.0.0.1:5000/update", json=data)
-        print("📡 Sent:", data)
-    except Exception as e:
-        print("❌ API Error:", e)
+    except:
+        pass
 
 # ------------------------------
-# MODE SELECTION
+# ESP32 CAMERA (CAPTURE MODE)
 # ------------------------------
-print("===================================")
-print("🚀 SKY GUARDIAN SYSTEM")
-print("===================================")
-print("1 - Live Camera")
-print("2 - Video File")
-print("===================================")
+STREAM_URL = "http://10.226.71.216/capture"
 
-choice = input("Enter choice (1/2): ")
+def get_frame():
+    try:
+        response = requests.get(STREAM_URL, timeout=2)
+        img_array = np.frombuffer(response.content, dtype=np.uint8)
+        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        return frame
+    except:
+        return None
 
-if choice == "1":
-    cap = cv2.VideoCapture(0)
-    print("📷 Using Live Camera...")
-elif choice == "2":
-    video_path = input("📂 Enter video file path: ")
-    cap = cv2.VideoCapture(video_path)
-    print(f"🎥 Processing video: {video_path}")
-else:
-    print("❌ Invalid choice")
-    exit()
-
-if not cap.isOpened():
-    print("❌ Error opening video source")
-    exit()
-
-# ------------------------------
-# SAVE OUTPUT VIDEO
-# ------------------------------
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
-out = cv2.VideoWriter('output.avi', fourcc, 20.0, (640, 480))
+print("📡 ESP32 Camera Ready")
 
 # ------------------------------
 # LOAD MODEL
@@ -57,10 +39,10 @@ out = cv2.VideoWriter('output.avi', fourcc, 20.0, (640, 480))
 model = YOLO("yolov8n.pt")
 
 # ------------------------------
-# MEDIAPIPE SETUP
+# MEDIAPIPE SAFE INIT
 # ------------------------------
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose()
+pose = None
+print("⚠️ Mediapipe disabled")
 
 # ------------------------------
 # VARIABLES
@@ -69,187 +51,131 @@ prev_positions = {}
 movement_threshold = 15
 prev_gray = None
 
-frame_count = 0
-anomaly_count = 0
-
-print("🚀 SYSTEM STARTED")
-
 # ==========================================
-# MAIN LOOP
+# FRAME GENERATOR (FOR FLASK)
 # ==========================================
-while True:
-    ret, frame = cap.read()
+def generate_frames():
+    global prev_positions, prev_gray
 
-    if not ret:
-        print("✅ Processing complete")
-        break
+    while True:
+        frame = get_frame()
 
-    frame = cv2.resize(frame, (640, 480))
-    frame_count += 1
+        if frame is None:
+            continue
 
-    results = model(frame)
-    current_positions = {}
+        frame = cv2.resize(frame, (640, 480))
 
-    for r in results:
-        for i, box in enumerate(r.boxes):
+        results = model(frame)
+        current_positions = {}
 
-            cls = int(box.cls[0])
-            conf = float(box.conf[0])
+        for r in results:
+            for i, box in enumerate(r.boxes):
 
-            if conf > 0.5:
+                cls = int(box.cls[0])
+                conf = float(box.conf[0])
 
-                label = model.names[cls]
+                if conf > 0.5:
+                    label = model.names[cls]
 
-                # --------------------------
-                # BOUNDING BOX
-                # --------------------------
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
 
-                current_positions[i] = (cx, cy)
+                    current_positions[i] = (cx, cy)
 
-                # --------------------------
-                # DEFAULT STATUS
-                # --------------------------
-                status = "NORMAL"
-                priority = "LOW"
-
-                # --------------------------
-                # HUMAN LOGIC
-                # --------------------------
-                if label == "person":
-
-                    posture = "UNKNOWN"
-                    person_img = frame[y1:y2, x1:x2]
-
-                    if person_img.size > 0:
-                        rgb = cv2.cvtColor(person_img, cv2.COLOR_BGR2RGB)
-                        result_pose = pose.process(rgb)
-
-                        if result_pose.pose_landmarks:
-                            landmarks = result_pose.pose_landmarks.landmark
-
-                            left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
-                            left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
-
-                            if abs(left_shoulder.y - left_hip.y) < 0.05:
-                                posture = "LYING ⚠️"
-                            else:
-                                posture = "UPRIGHT"
-
-                    if posture == "LYING ⚠️":
-                        status = "INJURED 🚨"
-                        priority = "HIGH"
-
-                    elif i in prev_positions:
-                        px, py = prev_positions[i]
-                        dist = ((cx - px)**2 + (cy - py)**2)**0.5
-
-                        if dist < movement_threshold:
-                            status = "NOT MOVING ⚠️"
-                            priority = "MEDIUM"
-
-                # --------------------------
-                # NON-HUMAN OBJECTS
-                # --------------------------
-                else:
-                    status = f"{label.upper()} DETECTED"
+                    status = "NORMAL"
                     priority = "LOW"
 
-                # --------------------------
-                # COUNT ANOMALY
-                # --------------------------
-                if priority == "HIGH":
-                    anomaly_count += 1
+                    # ---------------- HUMAN ----------------
+                    if label == "person":
 
-                # --------------------------
-                # SEND DATA TO BACKEND
-                # --------------------------
-                data = {
-                    "latitude": 20.2961,
-                    "longitude": 85.8245,
-                    "object": label,
-                    "status": status,
-                    "priority": priority,
-                    "coordinates": [cx, cy]
-                }
+                        posture = "UNKNOWN"
+                        person_img = frame[y1:y2, x1:x2]
 
-                send_data(data)   # ✅ FIXED
+                        if person_img.size > 0 and pose is not None:
+                            rgb = cv2.cvtColor(person_img, cv2.COLOR_BGR2RGB)
+                            result_pose = pose.process(rgb)
 
-                # --------------------------
-                # DRAW
-                # --------------------------
-                color = (0, 255, 0)
-                if priority == "HIGH":
-                    color = (0, 0, 255)
-                elif priority == "MEDIUM":
-                    color = (0, 165, 255)
+                            if result_pose.pose_landmarks:
+                                landmarks = result_pose.pose_landmarks.landmark
 
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                                ls = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
+                                lh = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
 
-                cv2.putText(frame, f"{label}", (x1, y1 - 25),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                                if abs(ls.y - lh.y) < 0.05:
+                                    posture = "LYING ⚠️"
+                                else:
+                                    posture = "UPRIGHT"
 
-                cv2.putText(frame, status, (x1, y2 + 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                        if posture == "LYING ⚠️":
+                            status = "INJURED 🚨"
+                            priority = "HIGH"
 
-                cv2.putText(frame, f"Priority: {priority}", (x1, y2 + 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                        elif i in prev_positions:
+                            px, py = prev_positions[i]
+                            dist = ((cx - px)**2 + (cy - py)**2)**0.5
 
-                cv2.putText(frame, f"({cx},{cy})", (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 2)
+                            if dist < movement_threshold:
+                                status = "NOT MOVING ⚠️"
+                                priority = "MEDIUM"
 
-                if priority == "HIGH":
-                    print("🚨 CRITICAL ALERT DETECTED!")
+                    # ---------------- OTHER OBJECTS ----------------
+                    else:
+                        status = f"{label.upper()} DETECTED"
 
-    # --------------------------
-    # WATER + WIND DETECTION
-    # --------------------------
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    # ---------------- SEND DATA ----------------
+                    data = {
+                        "latitude": 20.2961,
+                        "longitude": 85.8245,
+                        "object": label,
+                        "status": status,
+                        "priority": priority,
+                        "coordinates": [cx, cy]
+                    }
 
-    if prev_gray is not None:
-        flow = cv2.calcOpticalFlowFarneback(
-            prev_gray, gray,
-            None, 0.5, 3, 15, 3, 5, 1.2, 0
-        )
+                    send_data(data)
 
-        magnitude, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-        avg_motion = np.mean(magnitude)
+                    # ---------------- DRAW ----------------
+                    color = (0, 255, 0)
+                    if priority == "HIGH":
+                        color = (0, 0, 255)
+                    elif priority == "MEDIUM":
+                        color = (0, 165, 255)
 
-        if avg_motion > 2:
-            cv2.putText(frame, "WATER FLOW 🌊", (20,40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
-        if avg_motion > 5:
-            cv2.putText(frame, "STRONG WIND 💨", (20,80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,0), 2)
+                    cv2.putText(frame, label, (x1, y1 - 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    prev_gray = gray
-    prev_positions = current_positions.copy()
+                    cv2.putText(frame, status, (x1, y2 + 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    out.write(frame)
+        # ---------------- FLOW DETECTION ----------------
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    cv2.imshow("🚁 SKY GUARDIAN AI SYSTEM", frame)
+        if prev_gray is not None:
+            flow = cv2.calcOpticalFlowFarneback(
+                prev_gray, gray, None,
+                0.5, 3, 15, 3, 5, 1.2, 0
+            )
 
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
+            mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+            avg_motion = np.mean(mag)
 
-# ------------------------------
-# REPORT
-# ------------------------------
-print("\n📊 ANALYSIS REPORT")
-print(f"Total Frames: {frame_count}")
-print(f"Critical Anomalies: {anomaly_count}")
+            if avg_motion > 2:
+                cv2.putText(frame, "WATER FLOW 🌊", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-if anomaly_count > 0:
-    print("🚨 ALERT: Anomalies detected")
-else:
-    print("✅ No anomalies detected")
+            if avg_motion > 5:
+                cv2.putText(frame, "STRONG WIND 💨", (20, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
-# ------------------------------
-# CLEANUP
-# ------------------------------
-cap.release()
-out.release()
-cv2.destroyAllWindows()
+        prev_gray = gray
+        prev_positions = current_positions.copy()
+
+        # ---------------- STREAM TO FLASK ----------------
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
