@@ -69,7 +69,7 @@ Sky-Guardian/
 
 ⚙️ Installation & Setup
 Clone the repository
-git clone https://github.com/your-username/sky-guardian.git
+git clone https://github.com/SanviShan25/Hack4IMPACTTrack2-SKY-GUARDIANS
 cd sky-guardian
 Install dependencies
 pip install -r requirements.txt
