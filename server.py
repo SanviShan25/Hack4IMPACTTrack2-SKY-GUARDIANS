@@ -1,49 +1,32 @@
-# ==========================================
-# SKY GUARDIAN BACKEND (FINAL FIXED)
-# ==========================================
-
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
+# 🔥 IMPORT ML STREAM
+from ML import generate_frames
+
 app = Flask(__name__)
-
-# 🔥 VERY IMPORTANT FIX
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
-
-@app.after_request
-def add_cors_headers(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response
-
+CORS(app)
 
 data_store = []
 
 # ------------------------------
-# UPDATE ROUTE
+# RECEIVE ML DATA
 # ------------------------------
 @app.route('/update', methods=['POST'])
 def update():
     data = request.json
     data_store.append(data)
-
-    response = jsonify({"message": "OK"})
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response, 200
+    return jsonify({"message": "OK"}), 200
 
 # ------------------------------
-# DATA ROUTE
+# SEND DATA TO FRONTEND
 # ------------------------------
 @app.route('/data', methods=['GET'])
 def get_data():
-    response = jsonify(data_store)
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response, 200
-
+    return jsonify(data_store), 200
 
 # ------------------------------
-# SUPPLY ROUTE (FIXED)
+# SUPPLY REQUEST
 # ------------------------------
 @app.route('/request_supply', methods=['POST'])
 def supply():
@@ -51,9 +34,16 @@ def supply():
     print("📦 Supply Request:", data)
     return jsonify({"message": "Supply received"}), 200
 
+# ------------------------------
+# 🔥 LIVE VIDEO STREAM ROUTE
+# ------------------------------
+@app.route('/video')
+def video():
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ------------------------------
-# RUN
+# RUN SERVER
 # ------------------------------
 if __name__ == '__main__':
-    app.run(debug=False, host='127.0.0.1', port=5000)
+    app.run(host='0.0.0.0', port=5001, debug=False)
